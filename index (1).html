@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Транслит + генератор пароля</title>
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: #101827;
+    color: #f4f7fb;
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 28px 16px;
+}
+
+.container {
+    width: 100%;
+    max-width: 590px;
+    background: #202b3b;
+    border-radius: 18px;
+    padding: 28px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.25);
+}
+
+h1 {
+    margin: 0 0 8px;
+    font-size: 28px;
+}
+
+.description {
+    margin: 0 0 26px;
+    color: #aebbd0;
+    line-height: 1.55;
+}
+
+label {
+    display: block;
+    margin: 0 0 8px;
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.field {
+    width: 100%;
+    height: 46px;
+    border: 1px solid #4b596d;
+    border-radius: 10px;
+    background: #101827;
+    color: #fff;
+    padding: 0 14px;
+    font-size: 16px;
+    outline: none;
+}
+
+.field:focus {
+    border-color: #6254ee;
+}
+
+.form-group {
+    margin-bottom: 18px;
+}
+
+button.generate {
+    width: 100%;
+    height: 46px;
+    border: 0;
+    border-radius: 10px;
+    background: #5145e5;
+    color: white;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    margin: 0 0 24px;
+}
+
+button.generate:hover {
+    background: #5d51ef;
+}
+
+.result {
+    position: relative;
+    background: #101827;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 14px;
+    min-height: 106px;
+    margin-bottom: 12px;
+}
+
+.result-title {
+    color: #91a0b8;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-bottom: 15px;
+}
+
+.value {
+    font-size: 20px;
+    font-weight: 700;
+    padding-right: 105px;
+    word-break: break-all;
+}
+
+.copy {
+    position: absolute;
+    right: 14px;
+    top: 36px;
+    border: 0;
+    border-radius: 8px;
+    background: #3a4659;
+    color: white;
+    padding: 9px 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.copy:hover {
+    background: #4a586d;
+}
+
+.hint {
+    margin-top: 18px;
+    color: #91a0b8;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.hint strong {
+    color: #cbd5e1;
+}
+
+@media (max-width: 520px) {
+    body { padding: 12px; }
+    .container { padding: 20px; }
+    h1 { font-size: 24px; }
+}
+</style>
+</head>
+<body>
+
+<main class="container">
+    <h1>Транслит + генератор пароля</h1>
+    <p class="description">
+        Введите фамилию и имя. Сайт автоматически сформирует два варианта логина и пароль.
+    </p>
+
+    <div class="form-group">
+        <label for="fullName">Фамилия Имя</label>
+        <input
+            id="fullName"
+            class="field"
+            type="text"
+            placeholder="Например: Синкин Данил"
+            autocomplete="off"
+        >
+    </div>
+
+    <div class="form-group">
+        <label for="date">Дата в пароле</label>
+        <input id="date" class="field" type="date">
+    </div>
+
+    <button class="generate" type="button" onclick="generate()">Сгенерировать</button>
+
+    <div class="result">
+        <div class="result-title">Имя.Фамилия</div>
+        <div class="value" id="loginFirst">—</div>
+        <button class="copy" type="button" onclick="copyValue('loginFirst', this)">Копировать</button>
+    </div>
+
+    <div class="result">
+        <div class="result-title">Фамилия.Имя</div>
+        <div class="value" id="loginSecond">—</div>
+        <button class="copy" type="button" onclick="copyValue('loginSecond', this)">Копировать</button>
+    </div>
+
+    <div class="result">
+        <div class="result-title">Пароль</div>
+        <div class="value" id="password">—</div>
+        <button class="copy" type="button" onclick="copyValue('password', this)">Копировать</button>
+    </div>
+
+    <div class="hint">
+        Пример: <strong>Синкин Данил</strong> → d.sinkin и sinkin.d.
+        Пароль для даты 24.08.2026 → <strong>Si2026iN2408</strong>.<br>
+        Транслитерация фамилии выполняется по ГОСТ 7.79-2000, система Б.
+    </div>
+</main>
+
+<script>
+const GOST_B = {
+    "А":"A","Б":"B","В":"V","Г":"G","Д":"D","Е":"E","Ё":"E",
+    "Ж":"Zh","З":"Z","И":"I","Й":"I","К":"K","Л":"L","М":"M",
+    "Н":"N","О":"O","П":"P","Р":"R","С":"S","Т":"T","У":"U",
+    "Ф":"F","Х":"Kh","Ц":"Ts","Ч":"Ch","Ш":"Sh","Щ":"Shch",
+    "Ъ":"Ie","Ы":"Y","Ь":"","Э":"E","Ю":"Iu","Я":"Ia"
+};
+
+function transliterate(text) {
+    return [...text]
+        .map(char => GOST_B[char.toUpperCase()] ?? char)
+        .join("")
+        .toLowerCase();
+}
+
+function generate() {
+    const input = document.getElementById("fullName").value.trim();
+    const dateValue = document.getElementById("date").value;
+
+    const parts = input.split(/\s+/).filter(Boolean);
+
+    if (parts.length < 2) {
+        alert("Введите фамилию и имя, например: Синкин Данил");
+        return;
+    }
+
+    if (!dateValue) {
+        alert("Выберите дату");
+        return;
+    }
+
+    // Первый элемент — фамилия, второй — имя.
+    const surname = parts[0];
+    const firstName = parts[1];
+
+    // Транслитерируем фамилию и первую букву имени.
+    const latinSurname = transliterate(surname);
+    const latinFirstInitial = transliterate(firstName.charAt(0));
+
+    // Два варианта логина.
+    const loginFirst = latinFirstInitial + "." + latinSurname;
+    const loginSecond = latinSurname + "." + latinFirstInitial;
+
+    // Разбираем выбранную дату без зависимости от часового пояса.
+    const [year, month, day] = dateValue.split("-");
+
+    // Формируем пароль:
+    // первые 2 буквы фамилии: первая заглавная, вторая строчная;
+    // затем год;
+    // последние 2 буквы фамилии: предпоследняя строчная, последняя заглавная;
+    // затем DDMM.
+    const passwordSurname =
+        latinSurname.charAt(0).toUpperCase() + latinSurname.slice(1);
+
+    const firstTwo = passwordSurname.slice(0, 2);
+
+    const lastTwo =
+        passwordSurname.slice(-2, -1).toLowerCase() +
+        passwordSurname.slice(-1).toUpperCase();
+
+    const password =
+        firstTwo + year + lastTwo + day + month;
+
+    document.getElementById("loginFirst").textContent = loginFirst;
+    document.getElementById("loginSecond").textContent = loginSecond;
+    document.getElementById("password").textContent = password;
+}
+
+async function copyValue(id, button) {
+    const value = document.getElementById(id).textContent;
+
+    if (value === "—") return;
+
+    try {
+        await navigator.clipboard.writeText(value);
+        const oldText = button.textContent;
+        button.textContent = "Скопировано";
+        setTimeout(() => {
+            button.textContent = oldText;
+        }, 1200);
+    } catch {
+        alert("Не удалось скопировать автоматически. Скопируйте значение вручную.");
+    }
+}
+
+// При открытии страницы автоматически ставим сегодняшнюю дату.
+document.getElementById("date").value =
+    new Date().toISOString().slice(0, 10);
+
+// Enter в поле Фамилия Имя запускает генерацию.
+document.getElementById("fullName").addEventListener("keydown", event => {
+    if (event.key === "Enter") generate();
+});
+</script>
+
+</body>
+</html>
