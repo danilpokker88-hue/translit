@@ -543,19 +543,88 @@ function cellText(cell) {
  * Новый текст помещается в первый <w:t>, остальные старые текстовые
  * узлы очищаются.
  */
-function replaceCellText(cell, newText) {
-    const ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-    const textNodes = [...cell.getElementsByTagNameNS(ns, "t")];
+function xmlEscape(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+}
 
-    if (!textNodes.length) return false;
+/*
+ * В этом Word-шаблоне нужные данные находятся в обычных ячейках
+ * таблицы. Поэтому меняем непосредственно XML второго столбца,
+ * не пересобирая весь документ через DOMSerializer.
+ */
+function replaceTextInsideCellXml(cellXml, newText) {
+    const textTag = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g;
+    let first = true;
+    let found = false;
 
-    textNodes[0].textContent = newText;
+    const result = cellXml.replace(textTag, () => {
+        found = true;
 
-    for (let i = 1; i < textNodes.length; i++) {
-        textNodes[i].textContent = "";
-    }
+        if (first) {
+            first = false;
+            return "<w:t>" + xmlEscape(newText) + "</w:t>";
+        }
 
-    return true;
+        return "<w:t></w:t>";
+    });
+
+    return { xml: result, found };
+}
+
+/*
+ * Ищем строку таблицы по тексту первого столбца и заменяем
+ * только содержимое второго столбца.
+ */
+function replaceWordTableValue(xml, label, value) {
+    const trRegex = /<w:tr\b[\s\S]*?<\/w:tr>/g;
+    let found = false;
+
+    xml = xml.replace(trRegex, rowXml => {
+        if (!rowXml.includes(label)) {
+            return rowXml;
+        }
+
+        const cells = rowXml.match(/<w:tc\b[\s\S]*?<\/w:tc>/g);
+
+        if (!cells || cells.length < 2) {
+            return rowXml;
+        }
+
+        const firstCellText = cells[0]
+            .replace(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g, "$1")
+            .replace(/<[^>]+>/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        if (!firstCellText.includes(label)) {
+            return rowXml;
+        }
+
+        const replacement = replaceTextInsideCellXml(cells[1], value);
+
+        if (!replacement.found) {
+            return rowXml;
+        }
+
+        let index = 0;
+        const newRow = rowXml.replace(
+            /<w:tc\b[\s\S]*?<\/w:tc>/g,
+            cell => {
+                index++;
+                return index === 2 ? replacement.xml : cell;
+            }
+        );
+
+        found = true;
+        return newRow;
+    });
+
+    return { xml, found };
 }
 
 /*
@@ -568,48 +637,45 @@ function replaceCellText(cell, newText) {
  * шаблон konina.docx, сохраняя его оформление.
  */
 function fillWordXml(xmlText, data) {
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(xmlText, "application/xml");
+    let result = xmlText;
 
-    if (xml.getElementsByTagName("parsererror").length) {
-        throw new Error("Не удалось прочитать структуру Word-файла.");
-    }
+    const loginResult = replaceWordTableValue(
+        result,
+        "Логин/пароль для доступа к корп. сервисам:",
+        data.login + " \\ " + data.password
+    );
 
-    const ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-    const rows = [...xml.getElementsByTagNameNS(ns, "tr")];
+    result = loginResult.xml;
 
-    let loginFound = false;
-    let emailFound = false;
+    const emailResult = replaceWordTableValue(
+        result,
+        "Адрес электронной почты и пароль:",
+        data.email + " \\ " + data.password
+    );
 
-    for (const row of rows) {
-        const cells = [...row.getElementsByTagNameNS(ns, "tc")];
+    result = emailResult.xml;
 
-        if (cells.length < 2) continue;
-
-        const first = cellText(cells[0]).replace(/\s+/g, " ").trim();
-
-        if (first.includes("Логин/пароль для доступа к корп. сервисам")) {
-            replaceCellText(cells[1], data.login + " \\ " + data.password);
-            loginFound = true;
-        }
-
-        if (first.includes("Адрес электронной почты и пароль")) {
-            replaceCellText(cells[1], data.email + " \\ " + data.password);
-            emailFound = true;
-        }
-    }
-
-    if (!loginFound || !emailFound) {
+    if (!loginResult.found || !emailResult.found) {
         throw new Error(
-            "В документе не найдены поля логина/пароля и электронной почты. " +
-            "Используйте Word-шаблон такого же вида, как konina.docx."
+            "Не удалось найти оба поля в Word-шаблоне. " +
+            "Используйте документ такого же вида, как konina.docx."
         );
     }
 
-    const serializer = new XMLSerializer();
-    return serializer.serializeToString(xml);
-}
+    /*
+     * Не даём скачать исходную копию, если замена фактически
+     * не произошла.
+     */
+    if (
+        !result.includes(xmlEscape(data.login)) ||
+        !result.includes(xmlEscape(data.email)) ||
+        !result.includes(xmlEscape(data.password))
+    ) {
+        throw new Error("Проверка заполнения Word не пройдена.");
+    }
 
+    return result;
+}
 async function createWord() {
     const status = document.getElementById("wordStatus");
 
